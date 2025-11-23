@@ -1,4 +1,4 @@
-# Інструкція з тестування застосунку ToDo у Kubernetes
+# Інструкція з тестування застосунку ToDo у Kubernetes (оновлено під актуальні порти)
 
 ## 1. Передумови
 Необхідно налаштувати:
@@ -6,7 +6,7 @@
 - kubectl
 - Docker 
 
-Порт застосунку всередині контейнера: 8000.
+Порт застосунку всередині контейнера: 8080 (targetPort). Сервіс надає доступ по порту 80 (port). NodePort відкриває порт 30080 на вузлі.
 
 ## 2. Збірка Docker-образу
 Перейдіть у корінь репозиторію, де знаходиться `Dockerfile`.
@@ -20,49 +20,48 @@ docker tag todo-app:latest <REGISTRY>/todo-app:latest
 docker push <REGISTRY>/todo-app:latest
 ```
 ```
-Застосувати:
+Застосувати (за потреби):
 ```cmd
 kubectl apply -f deployment.yaml
 ```
-Перевірити:
+Перевірити Pod-и (або ваш існуючий `todoapp-pod1`):
 ```cmd
 kubectl get pods -l app=todolist
+kubectl get pod todoapp-pod1
 ```
 
 ## 3. Сервіс типу ClusterIP
-Створіть файл `service-clusterip.yaml`:
+Створіть файл `service-clusterip.yaml` (оновлені порти):
 ```yaml
 apiVersion: v1
 kind: Service
 metadata:
-  name: todo-clusterip
+  name: clusterip            # фактичне ім'я сервісу; замініть якщо у вашому YAML інше
 spec:
   type: ClusterIP
   selector:
     app: todolist
   ports:
     - name: http
-      port: 8000
-      targetPort: 8000
+      port: 80               # порт сервісу (client-facing)
+      targetPort: 8080       # порт контейнера
 ```
 Застосувати:
 ```cmd
 kubectl apply -f service-clusterip.yaml
-kubectl get svc todo-clusterip
+kubectl get svc clusterip
 ```
+(Якщо ваш сервіс має іншу назву, адаптуйте команди; раніше приклади з `todo-clusterip` були замінені.)
 
 ## 4. Тест DNS (ClusterIP) з контейнера busybox
-Запустити тимчасовий Pod з образом `busybox` і виконати DNS-запити та HTTP-звернення:
 ```cmd
 kubectl run dns-test --image=busybox:1.36 --restart=Never -it --rm -- sh
 ```
 Всередині busybox:
 ```sh
-nslookup todo-clusterip
-# Або перевірити повне доменне ім'я (FQDN) якщо є namespace (за замовчуванням 'default'):
-nslookup todo-clusterip.default.svc.cluster.local
-# Отримати головну сторінку (busybox може не мати wget з SSL підтримкою, але http працює):
-wget -qO- http://todo-clusterip:8000/ | head
+nslookup clusterip
+nslookup clusterip.default.svc.cluster.local
+wget -qO- http://clusterip:80/ | head
 exit
 ```
 Альтернатива з curl:
@@ -71,18 +70,18 @@ kubectl run curl-test --image=curlimages/curl:8.7.1 --restart=Never -it --rm -- 
 ```
 Всередині:
 ```sh
-curl -v http://todo-clusterip:8000/
+curl -v http://clusterip:80/
 exit
 ```
 
 ## 5. Тест через port-forward сервісу
-Проброс порту сервісу локально:
+Проброс порту сервісу локально (локальний порт 8080 -> сервісний 80):
 ```cmd
-kubectl port-forward svc/todo-clusterip 8000:8000
+kubectl port-forward svc/clusterip 8080:80
 ```
-Поки команда активна, у браузері відкрийте:
+У браузері:
 ```
-http://localhost:8000/
+http://localhost:8080/
 ```
 Зупинити CTRL+C.
 
@@ -92,20 +91,20 @@ http://localhost:8000/
 apiVersion: v1
 kind: Service
 metadata:
-  name: todo-nodeport
+  name: nodeport
 spec:
   type: NodePort
   selector:
     app: todolist
   ports:
-    - port: 8000        # порт сервісу
-      targetPort: 8000  # порт контейнера
-      nodePort: 30080   # бажаний NodePort (повинен бути у діапазоні 30000-32767)
+    - port: 80          # порт сервісу
+      targetPort: 8080  # порт контейнера
+      nodePort: 30080   # зовнішній порт на вузлі
 ```
 Застосувати:
 ```cmd
 kubectl apply -f service-nodeport.yaml
-kubectl get svc todo-nodeport
+kubectl get svc nodeport
 ```
 Отримати IP вузла (Node):
 ```cmd
@@ -119,30 +118,50 @@ curl http://<NODE_IP>:30080/
 ```
 http://<NODE_IP>:30080/
 ```
-Якщо використовуєте minikube:
+Для minikube:
 ```cmd
 minikube ip
 curl http://<MINIKUBE_IP>:30080/
 ```
 
 ## 8. Діагностика та пошук проблем
+Опис ресурсів:
+```cmd
+kubectl describe svc clusterip
+kubectl describe svc nodeport
+```
+Перевірка Pod (наприклад ваш `todoapp-pod1`):
+```cmd
+kubectl describe pod todoapp-pod1
+kubectl logs todoapp-pod1 --tail=100
+```
+Якщо використовуєте Deployment:
 ```cmd
 kubectl describe deployment todo-deployment
-kubectl describe svc todo-clusterip
-kubectl logs -l app=todolist --tail=100
+```
+Події:
+```cmd
 kubectl get events --sort-by=.metadata.creationTimestamp
 ```
-Перевірити резолюцію DNS (CoreDNS):
+DNS (CoreDNS):
 ```cmd
 kubectl get pods -n kube-system -l k8s-app=kube-dns
 ```
 Якщо сторінка не відкривається:
-- Перевірити чи Pod у статусі Running
-- Переконатися що порт 8000 відкрито у контейнері
-- Перевірити логи на помилки міграцій / імпорту
+- Pod не в статусі Running
+- Невірний порт у сервісі (має бути port:80 targetPort:8080)
+- Застосунок слухає інший порт (перевірити logs)
+- Проблеми міграцій / виключення у Django
 
-## 9. Очистка ресурсів
+## 8. Очистка ресурсів
 ```cmd
-kubectl delete svc todo-clusterip todo-nodeport
+kubectl delete svc clusterip nodeport
+# або видалити окремий Pod якщо вручну створювали:
+# kubectl delete pod todoapp-pod1
 ```
-(Переконайтесь що більше не потрібні ці ресурси.)
+
+## 10. Port mapping резюме
+- Всередині контейнера: 8080 
+- ClusterIP service: port 80 -> targetPort 8080
+- NodePort service: nodePort 30080 -> port 80 -> targetPort 8080
+- Локальний port-forward: localhost:8080 -> svc/clusterip:80
