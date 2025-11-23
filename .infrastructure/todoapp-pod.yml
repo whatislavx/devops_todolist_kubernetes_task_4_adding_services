@@ -1,14 +1,19 @@
 apiVersion: v1
 kind: Pod
 metadata:
-  name: todoapp
+  name: todoapp-pod
   namespace: todoapp
+  labels:
+    app: todolist
 spec:
   containers:
   - name: todoapp
     image: ikulyk404/todoapp:3.0.0
     ports:
     - containerPort: 8080
+    env:
+      - name: PYTHONUNBUFFERED
+        value: "1"
     livenessProbe:
       httpGet:
         path: api/health
