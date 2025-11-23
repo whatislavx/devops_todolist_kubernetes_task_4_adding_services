@@ -20,16 +20,8 @@ docker tag todo-app:latest <REGISTRY>/todo-app:latest
 docker push <REGISTRY>/todo-app:latest
 ```
 ```
-Застосувати (за потреби):
-```cmd
-kubectl apply -f deployment.yaml
-```
-Перевірити Pod-и (або ваш існуючий `todoapp-pod1`):
-```cmd
-kubectl get pods -l app=todolist
-kubectl get pod todoapp-pod1
-```
 
+```
 ## 3. Сервіс типу ClusterIP
 Створіть файл `service-clusterip.yaml` (оновлені порти):
 ```yaml
